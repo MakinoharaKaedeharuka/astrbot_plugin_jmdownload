@@ -4,6 +4,8 @@ AstrBot 插件
 
 支持下载jm的下载与搜索功能，输入/help查看功能
 
+可到邮箱kkkkk1971@outlook.com提供反馈与建议
+
 > [!NOTE]
 > This repo is just a template of [AstrBot](https://github.com/AstrBotDevs/AstrBot) Plugin.
 > 
