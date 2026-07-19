@@ -2,7 +2,7 @@
 
 AstrBot 插件
 
-半成品，仅可实现功能
+支持下载jm的下载与搜索功能，输入/help查看功能
 
 > [!NOTE]
 > This repo is just a template of [AstrBot](https://github.com/AstrBotDevs/AstrBot) Plugin.

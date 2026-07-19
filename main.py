@@ -14,7 +14,7 @@ import subprocess
 from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent, MessageChain, MessageEventResult, EventResultType
 from astrbot.api.platform import MessageType
-from astrbot.api.message_components import File, Plain
+from astrbot.api.message_components import File, Plain, Node, Image
 from astrbot.api.star import Star
 from astrbot.api.star import Context, register
 from astrbot.api import AstrBotConfig
@@ -24,8 +24,7 @@ import astrbot.api.message_components as Comp
 
 
 
-@register("helloworld", "YourName", "一个简单的 Hello World 插件", "1.0.0")
-class MyPlugin(Star):
+class JMdownloader(Star):
     def __init__(self, context: Context):
         super().__init__(context)
         self.timeout = 10       # 命令最大执行超时
@@ -34,31 +33,151 @@ class MyPlugin(Star):
     async def initialize(self):
         """可选择实现异步的插件初始化方法，当实例化该插件类之后会自动调用该方法。"""
 
-    @filter.command("jm")
-    async def jm(self, event: AstrMessageEvent, jmd: str = ""):
+    @filter.command("help")
+    async def help(self, event: AstrMessageEvent):
+        yield event.plain_result("使用格式: \n"
+                                 "下载/jm download 车牌号\n"
+                                 "搜索/jm search 关键词\n"
+                                 "分页搜索/jm page 关键词 页码")
+
+    """jmsearch插件，提供搜索和下载功能"""
+
+
+    @filter.command_group("jm") 
+    def jm():
+        pass
+
+
+
+    @jm.command("download")
+    async def jmdownload(self, event: AstrMessageEvent, jmd: str = ""):
         if not jmd:
-            yield event.plain_result("使用格式: /jm <车牌号>")
+            yield event.plain_result("使用格式: /jm download 车牌号")
             return
-        
+
         option = create_option_by_file("C:/Users/kkkkk/Desktop/option.yml")
-        option.download_album(jmd)
+
+        
+        client = JmOption.default().new_jm_client()
 
         try:
+            album: JmAlbumDetail = client.get_album_detail(jmd)
+            """ 获得信息 """
 
-            outphoto: str = jmd + ".pdf"
+        except MissingAlbumPhotoException as e:
+            yield event.plain_result(f'id={e.error_jmid}的本子不存在')
+            return
+            """不存在"""
 
-            chain = [
+        except JsonResolveFailException as e:
+            yield event.plain_result(f'解析json失败')
+            resp = e.resp
+            yield event.plain_result(f'resp.text: {resp.text}, resp.status_code: {resp.status_code}')
+            return
+            """解析json失败"""
 
-                Comp.File(file="D:/jmd/" + outphoto, name = outphoto),
-                Comp.Plain("密码114514")
+        except RequestRetryAllFailException as e:
+            yield event.plain_result(f'请求失败，重试次数耗尽')
+            return
+            """请求失败"""
 
-            ]
-            yield event.chain_result(chain)
-        except subprocess.TimeoutExpired:
-            yield event.plain_result("执行超时（10s），命令已终止")
+        except JmcomicException as e:
+            yield event.plain_result(f'jmcomic遇到异常: {e}')
+            return
+            """jmcomic遇到异常"""
+
+        page = client.search_site(search_query=jmd)
+        album: JmAlbumDetail = page.single_album
+        yield event.plain_result(f'本子标题: 《{album.title}》正在下载，请等待')
+        """获取信息并输出反馈""" 
+        
+
+        try:
+            download_album(jmd,option)
+            """下载本子"""
         except Exception as e:
-            logger.error(f"cmd执行异常: {e}")
-            yield event.plain_result(f"执行失败：{str(e)}")
+            yield event.plain_result(f'下载失败，请稍后重试: {e}')
+            return
+            """下载失败"""
+
+        user_name = event.get_sender_name()
+
+        outphoto = f"{jmd}.pdf"
+
+        chain = [
+            
+            Comp.Plain('下载成功，请等待文件上传'),
+            Comp.File(file="D:/jmd/" + outphoto, name = outphoto),
+            Comp.At(qq=event.get_sender_id()),
+            Comp.Plain(f'下载成功')
+
+        ]
+
+        yield event.chain_result(chain)
+        """上传文件并输出反馈"""
+
+
+    @jm.command("search") #标题搜索
+    async def jms(self, event: AstrMessageEvent, jms: str = ""):
+        if not jms:
+            yield event.plain_result("使用格式: /jm search 关键词")
+            return
+
+        option = create_option_by_file("C:/Users/kkkkk/Desktop/option.yml")
+        """读取配置文件"""
+        
+        client = JmOption.default().new_jm_client()
+
+        page: JmSearchPage = client.search_site(jms, page=1)
+        """搜索本子"""
+
+        yield event.plain_result(f'结果总数: {page.total}, 分页大小: {page.page_size}，页数: {page.page_count}, 页码: 1')
+        
+        output = ""
+
+        for album_id, title in page:
+            output= output + f'[{album_id}]: [{title}]\n'
+
+        node = Node(
+            uin=2706463790,
+            name="KoNeko",
+            content=[
+                Plain(output)
+            ]
+        )
+        yield event.chain_result([node])
+
+
+
+    @jm.command("page")
+    async def page_search(self, event: AstrMessageEvent, jms: str = "", page_input: int = 1):
+        if not jms:
+            yield event.plain_result("使用格式: /jm page 关键词 页码")
+            return
+
+        option = create_option_by_file("C:/Users/kkkkk/Desktop/option.yml")
+        """读取配置文件"""
+        
+        client = JmOption.default().new_jm_client()
+
+        page: JmSearchPage = client.search_site(jms, page=int(page_input))
+        """搜索本子"""
+
+        yield event.plain_result(f'结果总数: {page.total}, 分页大小: {page.page_size}，页数: {page.page_count}, 页码: {page_input}')
+        
+        output = ""
+
+        for album_id, title in page:
+            output= output + f'[{album_id}]: [{title}]\n'
+
+        node = Node(
+            uin=2706463790,
+            name="KoNeko",
+            content=[
+                Plain(output)
+            ]
+        )
+        yield event.chain_result([node])
 
 
     async def terminate(self):
